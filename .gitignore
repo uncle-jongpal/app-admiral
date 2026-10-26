@@ -10,3 +10,4 @@ logs/
 config.json
 __pycache__/
 *.spec
+config.json.tmp

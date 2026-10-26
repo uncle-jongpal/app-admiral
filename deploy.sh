@@ -7,8 +7,15 @@ DST='C:/path/to/admiral'
 WIN='C:\path\to\admiral'
 cd "$(dirname "$0")"
 
-scp -q admiral.py pyproject.toml uv.lock build.bat setup.bat restart.ps1 install.ps1 version.txt admiral.ico "$HOST:$DST/"
+# 소스 묶어서 보내기(admiral 패키지는 통째로 교체)
+tar -cf /tmp/admiral-src.$$.tar run.py admiral tests pyproject.toml uv.lock build.bat setup.bat restart.ps1 install.ps1 version.txt admiral.ico
+scp -q /tmp/admiral-src.$$.tar "$HOST:$DST/src.tar"
+rm -f /tmp/admiral-src.$$.tar
+ssh "$HOST" "cd /d $WIN && (if exist admiral rmdir /s /q admiral) & (if exist admiral.py del admiral.py) & tar -xf src.tar && del src.tar"
 ssh "$HOST" "$WIN\\setup.bat" | tail -1
+
+# 시험 통과해야 교체
+ssh "$HOST" "cd /d $WIN && .venv\\Scripts\\python.exe -m pytest -q tests -p no:cacheprovider" | tail -1
 
 # 녹음·변환 중이면 끝날 때까지 기다린다(쓰는 도중에 끄지 않기)
 for _ in $(seq 1 60); do
