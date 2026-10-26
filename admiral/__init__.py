@@ -8,4 +8,4 @@
   features/  왼쪽 메뉴에 붙는 기능들. 기능 하나 = 폴더 하나(features/__init__.py 에 등록)
 """
 APP_NAME = "Admiral"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
