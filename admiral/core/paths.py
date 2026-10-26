@@ -9,7 +9,7 @@ from pathlib import Path
 
 FROZEN = getattr(sys, "frozen", False)
 BASE = Path(sys.executable).resolve().parents[2] if FROZEN else Path(__file__).resolve().parents[2]
-LOG_DIR = BASE / "logs"
+LOG_DIR = Path(os.environ.get("ADMIRAL_LOG_DIR") or BASE / "logs")  # 시험 때는 임시 폴더로
 CONFIG_PATH = BASE / "config.json"
 ICON_PATH = BASE / "admiral.ico"
 MODEL_DIR = BASE / "models"
