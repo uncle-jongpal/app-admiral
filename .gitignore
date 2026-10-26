@@ -1,0 +1,12 @@
+# 실행 환경·산출물(작업PC에서 만들어짐)
+.venv/
+.uv-cache/
+.uv-python/
+tools/
+models/
+dist/
+tmp/
+logs/
+config.json
+__pycache__/
+*.spec
