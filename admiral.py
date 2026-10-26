@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 APP_NAME = "Admiral"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 TASK_NAME = "admiral"
 
 # 실행 파일(dist\Admiral\Admiral.exe)로 돌 때도 설정·기록·모델은 프로젝트 폴더에 둔다
@@ -79,10 +79,13 @@ RATE = 16000
 SEND_APPS = {"discord.exe", "discordptb.exe", "discordcanary.exe"}
 DEFAULT_MIC = "윈도우 기본 마이크"
 CONFIG_PATH = BASE / "config.json"
-DEFAULTS = {"mic": DEFAULT_MIC, "hotkey": "f9", "auto_send": True, "engine": "gpu", "silence": 3.0,
+DEFAULTS = {"mic": DEFAULT_MIC, "hotkey": "f9", "auto_send": True, "engine": "gpu_acc", "silence": 3.0,
             "no_speech": 10.0, "max_sec": 120.0, "min_level": 0.004, "sound": True, "overlay": True,
             "hotwords": "쫑팔, 자비스, 트론, 타스, 사만다, 베이맥스, 프라이데이"}
-ENGINES = {"gpu": ("large-v3-turbo", "cuda", "float16"), "cpu": ("medium", "cpu", "int8")}
+ENGINES = {"gpu": ("large-v3-turbo", "cuda", "float16"),     # 빠름
+           "gpu_acc": ("large-v3", "cuda", "int8_float16"),  # 정확(받아쓰기 서버와 같은 모델, 메모리 줄인 형식)
+           "cpu": ("medium", "cpu", "int8")}
+ENGINE_LABELS = {"gpu": "빠름", "gpu_acc": "정확", "cpu": "CPU"}
 
 LOG_DIR = BASE / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -224,7 +227,7 @@ class Engine:
             gc.collect()
             while True:
                 name, device, ctype = ENGINES[kind]
-                self._set(f"{'그래픽카드' if kind == 'gpu' else 'CPU'} 모델 올리는 중…")
+                self._set(f"{ENGINE_LABELS[kind]} 모델 올리는 중…")
                 t0 = time.time()
                 try:
                     from faster_whisper import WhisperModel
@@ -232,12 +235,12 @@ class Engine:
                                               **({"cpu_threads": 8} if device == "cpu" else {}))
                     self.kind = kind
                     took = time.time() - t0
-                    self._set(("그래픽카드(빠름) 준비됨" if kind == "gpu" else "CPU 준비됨") + f" · 올리는 데 {took:.0f}초")
+                    self._set(f"{ENGINE_LABELS[kind]} 모델 준비됨 · 올리는 데 {took:.0f}초")
                     log(f"받아쓰기 모델 준비 {name}/{device} ({took:.1f}초)")
                     break
                 except Exception as e:
                     log(f"받아쓰기 모델 실패 {name}/{device}: {e}")
-                    if kind == "gpu":
+                    if kind != "cpu":
                         kind = "cpu"  # 그래픽카드가 안 되면 CPU 로
                         continue
                     self._set(f"받아쓰기 모델 실패: {str(e)[:80]}")
@@ -252,11 +255,32 @@ class Engine:
         self.ready.wait()
         if self.model is None:
             raise RuntimeError("받아쓰기 모델 없음")
-        audio = pcm.astype(np.float32) / 32768
+        audio = normalize(pcm)
         segs, _ = self.model.transcribe(audio, language="ko", beam_size=1 if self.kind == "cpu" else 5,
                                         vad_filter=True, condition_on_previous_text=False,
                                         hotwords=hotwords or None)
         return "".join(s.text for s in segs).strip()
+
+
+def normalize(pcm):
+    """작은 소리를 키운다(마이크 입력이 작으면 받아쓰기가 비슷한 단어로 헷갈림). 최대 20배."""
+    audio = pcm.astype(np.float32) / 32768
+    peak = float(np.percentile(np.abs(audio), 99.9)) if len(audio) else 0.0
+    if peak > 1e-4:
+        audio = np.clip(audio * min(0.5 / peak, 20.0), -1.0, 1.0)
+    return audio
+
+
+def save_last(pcm):
+    """마지막 녹음 1개만 남김(받아쓰기 품질 비교용, 매번 덮어씀)."""
+    try:
+        with wave.open(str(LOG_DIR / "last.wav"), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(RATE)
+            w.writeframes(pcm.tobytes())
+    except Exception as e:
+        log(f"마지막 녹음 저장 실패: {e}")
 
 
 def deliver(text, auto_send):
@@ -425,17 +449,22 @@ class App:
             self.nav[key] = b
         ctk.CTkLabel(side, text=f"v{APP_VERSION}", text_color=THEME["sub"], font=(FONT, 10)).pack(side="bottom", pady=12)
 
-        self.pages["voice"] = ctk.CTkFrame(body, fg_color="transparent")
-        self.pages["settings"] = ctk.CTkScrollableFrame(body, fg_color="transparent")
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_columnconfigure(0, weight=1)
+        self.pages["voice"] = ctk.CTkFrame(body, fg_color=THEME["bg"])
+        self.pages["settings"] = ctk.CTkScrollableFrame(body, fg_color=THEME["bg"])
+        for p in self.pages.values():
+            p.grid(row=0, column=0, sticky="nsew", padx=18, pady=18)
         self._build_voice(self.pages["voice"])
         self._build_settings(self.pages["settings"])
         self.show_page("voice")
 
     def show_page(self, key):
-        for k, p in self.pages.items():
-            p.pack_forget()
+        # 두 화면을 같은 자리에 겹쳐 두고 앞으로 올리기만 함(떼었다 붙이면 전체를 다시 배치해서 느림)
+        for k in self.pages:
             self.nav[k].configure(fg_color=THEME["field"] if k == key else "transparent")
-        self.pages[key].pack(fill="both", expand=True, padx=18, pady=18)
+        page = self.pages[key]
+        getattr(page, "_parent_frame", page).tkraise()
 
     def _build_voice(self, f):
         # 상태 카드
@@ -509,11 +538,11 @@ class App:
 
         # 받아쓰기
         c = self._card(f, "받아쓰기")
-        r = self._row(c, "엔진", "그래픽카드: 빠름(1초 안쪽), 그래픽카드 메모리 약 2GB 계속 사용\n"
+        r = self._row(c, "엔진", "빠름: 그래픽카드, 1초 안쪽\n정확: 그래픽카드, 1~2초, 더 정확\n"
                                 "CPU: 게임 영향 없음, 말한 길이만큼 걸림")
-        self.engine_var = ctk.StringVar(value="그래픽카드" if self.cfg["engine"] == "gpu" else "CPU")
-        ctk.CTkSegmentedButton(r, values=["그래픽카드", "CPU"], variable=self.engine_var, command=self.on_engine,
-                               font=(FONT, 12), height=30, width=170, selected_color=THEME["accent"],
+        self.engine_var = ctk.StringVar(value=ENGINE_LABELS[self.cfg["engine"]])
+        ctk.CTkSegmentedButton(r, values=list(ENGINE_LABELS.values()), variable=self.engine_var,
+                               command=self.on_engine, font=(FONT, 12), height=30, width=200, selected_color=THEME["accent"],
                                unselected_color=THEME["field"]).pack()
         self.engine_status = self._wrap(ctk.CTkLabel(c, text="", text_color=THEME["sub"], font=(FONT, 11),
                                                      anchor="w", justify="left"))
@@ -548,7 +577,20 @@ class App:
                       hover_color=THEME["field_hover"], command=lambda: os.startfile(LOG_DIR)).pack()
 
     def _on_resize(self, e=None):
+        # <Configure> 는 안쪽 칸 하나만 바뀌어도 수십 번 온다 → 창 폭이 실제로 바뀔 때만, 0.1초 모아서 한 번
+        if e is not None and e.widget is not self.root:
+            return
+        width = self.root.winfo_width()
+        if width == getattr(self, "_last_width", None):
+            return
+        self._last_width = width
+        if getattr(self, "_resize_job", None):
+            self.root.after_cancel(self._resize_job)
+        self._resize_job = self.root.after(100, self._apply_wrap)
+
+    def _apply_wrap(self):
         # 긴 글은 창 폭에 맞춰 줄바꿈(잘리지 않게)
+        self._resize_job = None
         w = max(self.root.winfo_width() - 170 - 36 - 200, 220)
         for lb in self.wrap_labels:
             lb.configure(wraplength=w)
@@ -589,8 +631,12 @@ class App:
                     return
         except queue.Empty:
             pass
-        self.engine_status.configure(text=f"상태: {self.engine.status}")
-        self.engine_label.configure(text=f"받아쓰기 {self.engine.status}  ·  마이크: {self.default_mic}")
+        # 글자가 바뀔 때만 다시 그림(매번 그리면 스크롤·탭 이동이 버벅임)
+        status = (self.engine.status, self.default_mic)
+        if status != getattr(self, "_last_status", None):
+            self._last_status = status
+            self.engine_status.configure(text=f"상태: {self.engine.status}")
+            self.engine_label.configure(text=f"받아쓰기 {self.engine.status}  ·  마이크: {self.default_mic}")
         self.root.after(50, self.pump)
 
     def set_state(self, kind, title, detail=""):
@@ -661,7 +707,7 @@ class App:
         log(f"자동 멈춤: {self.sil_var.get()}")
 
     def on_engine(self, _=None):
-        kind = "gpu" if self.engine_var.get() == "그래픽카드" else "cpu"
+        kind = next(k for k, v in ENGINE_LABELS.items() if v == self.engine_var.get())
         if kind == self.cfg["engine"] and self.engine.kind == kind:
             return
         self.cfg["engine"] = kind
@@ -825,12 +871,13 @@ class App:
             log(f"음량 하위20% {np.percentile(noise, 20):.4f} 중간 {np.median(noise):.4f} 최대 {peak:.4f}")
         pcm = np.concatenate(chunks).reshape(-1)
         secs = len(pcm) / RATE
+        save_last(pcm)
 
         self.set_state("busy", "글자로 바꾸는 중", f"{secs:.1f}초 녹음 · {self.engine.status}")
         t1 = time.time()
         text = self.engine.transcribe(pcm, c["hotwords"])
         took = time.time() - t1
-        engine = "그래픽카드" if self.engine.kind == "gpu" else "CPU"
+        engine = ENGINE_LABELS.get(self.engine.kind, "?")
         log(f"변환 {took:.1f}초 [{engine}]: {text}")
         if not text:
             self.beep(400, 200)
@@ -841,7 +888,7 @@ class App:
         log(f"{how} (앞 창: {exe})")
         self.ui.put(("sent", f"{datetime.now():%H:%M}  {text}"))
         self.set_state("ok", "보냈어요" if sent else "입력창에 넣었어요",
-                       f"{secs:.1f}초 녹음 → {engine}로 {took:.1f}초 만에 받아씀" if sent
+                       f"{secs:.1f}초 녹음 → {engine} 모델로 {took:.1f}초 만에 받아씀" if sent
                        else f"앞 창이 디스코드가 아니라 엔터는 안 쳤어요 ({exe})")
 
 
