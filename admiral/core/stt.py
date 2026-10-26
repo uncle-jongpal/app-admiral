@@ -21,6 +21,8 @@ ENGINES = {"gpu": ("large-v3-turbo", "cuda", "float16"),
            "gpu_acc": ("large-v3", "cuda", "int8_float16"),
            "cpu": ("medium", "cpu", "int8")}
 ENGINE_LABELS = {"gpu": "빠름", "gpu_acc": "정확", "cpu": "CPU"}
+# 받아쓰기 한 번에 걸리는 시간(화면 안내용). 모델을 올리는 시간은 켤 때 한 번뿐이라 기록에만 남긴다.
+ENGINE_SPEED = {"gpu": "보낼 때 1초 안쪽", "gpu_acc": "보낼 때 1~2초", "cpu": "보낼 때 말한 길이만큼"}
 
 
 def normalize(pcm):
@@ -68,7 +70,7 @@ class Engine:
                                               **({"cpu_threads": 8} if device == "cpu" else {}))
                     self.kind = kind
                     took = time.time() - t0
-                    self._set(f"{ENGINE_LABELS[kind]} 모델 준비됨 · 올리는 데 {took:.0f}초")
+                    self._set(f"{ENGINE_LABELS[kind]} 모델 준비됨 · {ENGINE_SPEED[kind]}")
                     log(f"받아쓰기 모델 준비 {name}/{device} ({took:.1f}초)")
                     break
                 except Exception as e:
