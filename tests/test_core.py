@@ -69,3 +69,30 @@ def test_voice_gate_room_noise_is_not_speech():
         res = res or gate.feed([0.0002, 0.0004, 0.0001, 0.0006][i % 4], t)
         t += 0.05
     assert res == "nospeech"
+
+
+HOTWORDS = "쫑팔, 자비스, 트론, 타스, 사만다, 베이맥스, 프라이데이"
+
+
+def test_clean_drops_hotword_list_echo():
+    """2026-10-28 실제 결과: 힌트 단어 목록을 그대로 읽어 끝에 붙임."""
+    from admiral.core.stt import clean
+
+    text, removed = clean("메모리 남겨놓는 게 아니라 이거 내가 훅으로 걸어놓은 적 없어 자비스, 트론, 타스, 사만다, 베이맥스, 프라이데이", HOTWORDS)
+    assert text == "메모리 남겨놓는 게 아니라 이거 내가 훅으로 걸어놓은 적 없어"
+    assert removed == ["자비스, 트론, 타스, 사만다, 베이맥스, 프라이데이"]
+
+
+def test_clean_drops_trailing_subtitle_phrase():
+    from admiral.core.stt import clean
+
+    text, removed = clean("에이스가 이거 왜 이렇게 만든 건지 설명해 자막 제공 및 자막 제공 및 광고를 포함하고 있습니다.", HOTWORDS)
+    assert text == "에이스가 이거 왜 이렇게 만든 건지 설명해"
+    assert removed
+
+
+def test_clean_keeps_real_speech():
+    from admiral.core.stt import clean
+
+    for s in ["베이맥스한테 답하라고 그래", "자비스, 트론, 타스 셋이 같이 확인해", "자비스랑 트론한테 물어봐"]:
+        assert clean(s, HOTWORDS) == (s, [])

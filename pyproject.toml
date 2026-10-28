@@ -1,6 +1,6 @@
 [project]
 name = "admiral"
-version = "1.2.2"
+version = "1.2.3"
 description = "Admiral — 에이전트 함대 지휘 도구(음성 전송 등)"
 requires-python = ">=3.11,<3.13"
 dependencies = ["keyboard", "sounddevice", "numpy", "psutil", "pyperclip", "faster-whisper", "pystray", "pillow", "customtkinter", "nvidia-cublas-cu12==12.9.2.10", "nvidia-cudnn-cu12==9.25.1.1", "nvidia-cuda-nvrtc-cu12==12.9.86"]

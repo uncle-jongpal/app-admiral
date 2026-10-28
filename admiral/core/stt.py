@@ -10,6 +10,7 @@
     나면 모델을 다시 올리고 한 번 더 시도. 그래도 안 되면 CPU 로.
 """
 import gc
+import re
 import threading
 import time
 
@@ -32,6 +33,37 @@ def normalize(pcm):
     if peak > 1e-4:
         audio = np.clip(audio * min(0.5 / peak, 20.0), -1.0, 1.0)
     return audio
+
+
+# 말이 끝난 직후 모델이 지어내는 문장(유튜브 자막으로 학습한 흔적). 끝부분에서만 잘라 낸다.
+HALLUCINATIONS = [r"자막\s*제공", r"광고를\s*포함하고\s*있습니다", r"시청\s*해\s*주셔서\s*감사합니다",
+                  r"구독과\s*좋아요", r"한글\s*자막", r"자막\s*by"]
+TAIL_CHARS = 80  # 끝에서 이 글자 수 안에 나온 것만 지어낸 걸로 본다
+
+
+def clean(text, hotwords=""):
+    """지어낸 부분을 뺀다. (남은 글, 뺀 조각 목록)
+
+    - 끝에 자주 쓰는 단어가 쉼표로 3개 이상 이어지면 힌트를 그대로 읽은 것(문장 중간은 실제로 부른 걸 수 있어 둠)
+    - 끝부분의 알려진 환각 문장
+    """
+    removed = []
+    names = [re.escape(w.strip()) for w in hotwords.split(",") if w.strip()]
+    if len(names) >= 3:
+        name = "(?:" + "|".join(names) + ")"
+        m = re.search(name + r"(?:\s*,\s*" + name + r"){2,}[.,!?]?\s*$", text)
+        if m:
+            removed.append(m.group().strip())
+            text = text[:m.start()]
+    while True:
+        cuts = [m.start() for pat in HALLUCINATIONS for m in [re.search(pat, text)]
+                if m and len(text) - m.start() <= TAIL_CHARS]
+        if not cuts:
+            break
+        at = min(cuts)
+        removed.append(text[at:].strip())
+        text = text[:at]
+    return re.sub(r"\s{2,}", " ", text).strip(), removed
 
 
 class Engine:
@@ -91,7 +123,17 @@ class Engine:
         segs, _ = self.model.transcribe(audio, language="ko", beam_size=1 if self.kind == "cpu" else 5,
                                         vad_filter=True, condition_on_previous_text=False,
                                         hotwords=hotwords or None)
-        return "".join(s.text for s in segs).strip()
+        kept = []
+        for seg in segs:
+            # 모델 스스로 "말소리 아님"이라 보고 자신도 없는 조각 = 지어낸 것(Whisper 기본 판정 기준)
+            if seg.no_speech_prob > 0.6 and seg.avg_logprob < -1.0:
+                log(f"말소리 아닌 조각 버림: {seg.text.strip()}")
+                continue
+            kept.append(seg.text)
+        text, removed = clean("".join(kept).strip(), hotwords)
+        for r in removed:
+            log(f"지어낸 부분 뺌: {r}")
+        return text
 
     def transcribe(self, pcm, hotwords=""):
         self.ready.wait()
