@@ -8,6 +8,12 @@ from ...audio import devices, recorder
 from ...core.log import log, log_exc
 from ...system import windows
 
+CANCEL_KEY = "esc"
+
+
+class Cancelled(Exception):
+    pass
+
 
 class VoiceController:
     def __init__(self, app):
@@ -18,6 +24,7 @@ class VoiceController:
         self.active = False
         self.testing = False
         self.stop_event = threading.Event()
+        self.cancel_event = threading.Event()
 
     # ── 상태 알림 ──
     def status(self, kind, title, detail=""):
@@ -34,9 +41,11 @@ class VoiceController:
             self.active = True
             self.testing = testing
         self.stop_event.clear()
+        self.cancel_event.clear()
         return True
 
     def _end(self):
+        self._cancel_key(False)
         self.bus.post("overlay", False)
         self.bus.post("level", 0.0)
         self.active = False
@@ -51,9 +60,36 @@ class VoiceController:
         if self._begin():
             threading.Thread(target=self._run_safe, name="voice", daemon=True).start()
 
+    # ── 취소: 녹음·변환 중에만 Esc 를 잡는다(평소엔 다른 프로그램으로 그대로 감) ──
+    def cancel(self):
+        if self.active and not self.testing:
+            self.cancel_event.set()
+            self.stop_event.set()
+
+    def _cancel_key(self, on):
+        hk = getattr(self.app, "hotkeys", None)
+        if hk is None:
+            return
+        try:
+            if on:
+                hk.register("voice_cancel", CANCEL_KEY, self.cancel)
+            else:
+                hk.unregister("voice_cancel")
+        except Exception as e:
+            log(f"취소 키 {'걸기' if on else '풀기'} 실패: {e}")
+
+    def _check_cancel(self):
+        if self.cancel_event.is_set():
+            raise Cancelled()
+
     def _run_safe(self):
         try:
+            self._cancel_key(True)
             self._run()
+        except Cancelled:
+            log("사용자가 취소 (Esc)")
+            self.beep(400, 200)
+            self.status("idle", "취소했어요", "아무것도 보내지 않았어요")
         except recorder.NoSpeech as e:
             log(f"말소리 없음, 취소 (최대 음량 {e.peak:.3f})")
             self.beep(400, 200)
@@ -79,22 +115,29 @@ class VoiceController:
             self.bus.post("overlay", True)
         silence = self.cfg["silence"]
         self.status("rec", "녹음 중", f"{name}\n" + (f"말 끝나면 자동으로 보내요 ({key} 다시 눌러도 됨)" if silence > 0
-                                                    else f"다 말하면 {key}를 다시 누르세요"))
+                                                    else f"다 말하면 {key}를 다시 누르세요")
+                    + "\nEsc 누르면 취소")
         log(f"녹음 시작 ({name})")
         opts = recorder.RecordOptions(silence=silence, no_speech=self.cfg["no_speech"],
                                       max_sec=self.cfg["max_sec"], min_level=self.cfg["min_level"])
-        pcm = recorder.record(dev, self.stop_event, opts, on_level=lambda v: self.bus.post("level", v))
+        try:
+            pcm = recorder.record(dev, self.stop_event, opts, on_level=lambda v: self.bus.post("level", v))
+        except recorder.NoSpeech:
+            self._check_cancel()  # 말하기 전에 Esc 누른 것도 '소리 없음'이 아니라 취소로
+            raise
         self.bus.post("overlay", False)
+        self._check_cancel()
         self.beep(660, 120)
         secs = len(pcm) / recorder.RATE
         recorder.save_last(pcm)
 
         engine = self.app.engine
-        self.status("busy", "글자로 바꾸는 중", f"{secs:.1f}초 녹음 · {engine.status}")
+        self.status("busy", "글자로 바꾸는 중", f"{secs:.1f}초 녹음 · {engine.status}\nEsc 누르면 취소")
         t1 = time.time()
         text = engine.transcribe(pcm, self.cfg["hotwords"])
         took = time.time() - t1
         log(f"변환 {took:.1f}초 [{engine.label}]: {text}")
+        self._check_cancel()
         if not text:
             self.beep(400, 200)
             self.status("err", "받아쓴 글자가 없어요", "다시 말해 주세요")

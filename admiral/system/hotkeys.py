@@ -21,6 +21,10 @@ class Hotkeys:
         self._items[name] = (combo, callback)
         self._bind(name)
 
+    def unregister(self, name):
+        self._unbind(name)
+        self._items.pop(name, None)
+
     def change(self, name, combo):
         _, cb = self._items[name]
         self._unbind(name)
