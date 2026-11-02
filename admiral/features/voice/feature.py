@@ -31,6 +31,7 @@ class VoiceFeature(Feature):
         bus.on("level", self._on_level)
         bus.on("sent", self._on_sent)
         bus.on("overlay", lambda on: app.overlay and app.overlay.show(on))
+        bus.on("level", lambda v: app.overlay and app.overlay.level(v))
         bus.on("engine", self._on_engine)
         bus.on("hotkey", self._on_hotkey)
 
@@ -95,7 +96,7 @@ class VoiceFeature(Feature):
         w.segmented(r, list(SILENCE_OPTS), cur, lambda v: cfg.set("silence", SILENCE_OPTS[v]), width=210)
         r = w.setting_row(c, "효과음", "녹음 시작·끝에 '삑' 소리", wrapper)
         w.switch(r, cfg["sound"], lambda v: cfg.set("sound", v))
-        r = w.setting_row(c, "녹음 중 표시", "화면 오른쪽 아래에 빨간 '녹음 중' 표시", wrapper)
+        r = w.setting_row(c, "녹음 중 표시", "화면 오른쪽 아래에 빨간 '녹음 중' 표시와 마이크 소리 막대", wrapper)
         w.switch(r, cfg["overlay"], lambda v: cfg.set("overlay", v))
 
         c = w.card(f, "받아쓰기")
