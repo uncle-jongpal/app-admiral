@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # 개발 서버 → 작업PC 배포: 소스 복사 → (형이 녹음 중이 아니면) 끄고 → 빌드 → 다시 실행
-# 사용: ./deploy.sh            (작업PC user@pc-address, 프로젝트 C:\path\to\admiral)
+# 사용: ./deploy.sh   (배포 대상 PC·폴더는 deploy.env 에. deploy.env.example 참고, 깃에 안 올림)
 set -euo pipefail
-HOST=user@pc-address
-DST='C:/path/to/admiral'
-WIN='C:\path\to\admiral'
 cd "$(dirname "$0")"
+[ -f deploy.env ] || { echo "deploy.env 없음: deploy.env.example 을 복사해서 채우기"; exit 1; }
+. ./deploy.env
+: "${HOST:?deploy.env 에 HOST 필요}" "${WIN:?deploy.env 에 WIN 필요}"
+DST=${WIN//\\//}
 
 # 소스 묶어서 보내기(admiral 패키지는 통째로 교체)
 tar -cf /tmp/admiral-src.$$.tar run.py admiral tests pyproject.toml uv.lock build.bat setup.bat restart.ps1 install.ps1 version.txt admiral.ico

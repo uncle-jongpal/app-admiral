@@ -62,7 +62,7 @@ tests/                     윈도우 없이 도는 핵심 시험(pytest)
 | `build.bat` | PyInstaller로 `dist\Admiral\Admiral.exe` 생성 |
 | `install.ps1` | 처음 한 번: 로그온 자동 실행 등록, 바탕화면·시작 메뉴 바로가기 생성, 실행 |
 | `restart.ps1` | 다시 켜기 |
-| `deploy.sh` | 개발 서버 → 작업PC 배포(소스 복사 → 시험 → 사용 중이 아니면 끄고 → 빌드 → 실행) |
+| `deploy.sh` | 개발 서버 → 작업PC 배포(소스 복사 → 시험 → 사용 중이 아니면 끄고 → 빌드 → 실행). 대상 PC·폴더는 `deploy.env`(깃에 안 올림, `deploy.env.example` 참고) |
 | `version.txt` | 실행 파일 속성(이름·버전) |
 
 실행 중에 생기는 것(깃에 안 올림): `config.json`(설정), `logs\admiral-날짜.log`(기록), `logs\last.wav`(마지막 녹음 1개), `models\`(받아쓰기 모델 캐시), `.venv\`, `dist\`.
@@ -70,7 +70,7 @@ tests/                     윈도우 없이 도는 핵심 시험(pytest)
 ## 설치(작업PC)
 
 ```bat
-:: 1) 프로젝트 폴더에 소스를 두고 tools\uv.exe 를 넣는다
+:: 1) 아무 폴더에 소스를 받고 tools\uv.exe 를 넣는다(설치 위치는 bat 파일이 있는 폴더로 자동)
 :: 2) 환경 설치 → 빌드 → 설치
 setup.bat
 build.bat
